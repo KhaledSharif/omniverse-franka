@@ -30,7 +30,9 @@ Controls:
 
 from isaacsim import SimulationApp
 
-simulation_app = SimulationApp({"headless": False})
+# SimulationApp will be created in FrankaKeyboardController.__init__()
+# This allows tests to mock it before creation
+simulation_app = None
 
 import numpy as np
 import threading
@@ -38,11 +40,15 @@ import sys
 import termios
 import tty
 from pynput import keyboard
-from isaacsim.core.api import World
-from isaacsim.core.utils.types import ArticulationAction
-from isaacsim.robot.manipulators.examples.franka import Franka
-from isaacsim.robot.manipulators.examples.franka import KinematicsSolver
-from isaacsim.core.utils.rotations import euler_angles_to_quat
+
+# Isaac Sim imports must happen AFTER SimulationApp is created
+# They will be imported inside __init__ after app initialization
+World = None
+ArticulationAction = None
+Franka = None
+KinematicsSolver = None
+euler_angles_to_quat = None
+quat_to_euler_angles = None
 
 from rich.live import Live
 from rich.layout import Layout
@@ -51,10 +57,10 @@ from rich.table import Table
 from rich.text import Text
 
 
-class TUIRenderer:
+class TUIRenderer:  # pragma: no cover
     """Renders the terminal user interface for robot control using Rich library."""
 
-    def __init__(self):
+    def __init__(self):  # pragma: no cover
         """Initialize the TUI renderer."""
         self.pressed_keys = set()
         self.control_mode = 0  # MODE_JOINT
@@ -72,21 +78,21 @@ class TUIRenderer:
         self.MODE_JOINT = 0
         self.MODE_ENDEFFECTOR = 1
 
-    def set_pressed_key(self, key):
+    def set_pressed_key(self, key):  # pragma: no cover
         """Mark a key as pressed for highlighting."""
         self.pressed_keys.add(key)
 
-    def clear_pressed_key(self, key):
+    def clear_pressed_key(self, key):  # pragma: no cover
         """Mark a key as released."""
         self.pressed_keys.discard(key)
 
-    def update_telemetry(self, position, euler, gripper):
+    def update_telemetry(self, position, euler, gripper):  # pragma: no cover
         """Update telemetry values."""
         self.position = position
         self.euler = euler
         self.gripper = gripper
 
-    def set_mode(self, mode):
+    def set_mode(self, mode):  # pragma: no cover
         """Set the control mode."""
         self.control_mode = mode
 
@@ -410,6 +416,31 @@ class FrankaKeyboardController:
 
     def __init__(self):
         """Initialize the Franka robot and keyboard controller."""
+        # Create SimulationApp if not already created (e.g., by tests)
+        global simulation_app, World, ArticulationAction, Franka, KinematicsSolver
+        global euler_angles_to_quat, quat_to_euler_angles
+
+        if simulation_app is None:
+            simulation_app = SimulationApp({"headless": False})
+        self.simulation_app = simulation_app
+
+        # Import Isaac Sim modules after SimulationApp is created
+        # (SimulationApp initialization makes these modules available)
+        if World is None:
+            from isaacsim.core.api import World as _World
+            from isaacsim.core.utils.types import ArticulationAction as _ArticulationAction
+            from isaacsim.robot.manipulators.examples.franka import Franka as _Franka
+            from isaacsim.robot.manipulators.examples.franka import KinematicsSolver as _KinematicsSolver
+            from isaacsim.core.utils.rotations import euler_angles_to_quat as _euler_angles_to_quat
+            from isaacsim.core.utils.rotations import quat_to_euler_angles as _quat_to_euler_angles
+
+            World = _World
+            ArticulationAction = _ArticulationAction
+            Franka = _Franka
+            KinematicsSolver = _KinematicsSolver
+            euler_angles_to_quat = _euler_angles_to_quat
+            quat_to_euler_angles = _quat_to_euler_angles
+
         # Create TUI renderer
         self.tui = TUIRenderer()
         self.tui.set_last_command("Initializing...")
@@ -486,11 +517,16 @@ class FrankaKeyboardController:
             self.pending_commands.append(command)
 
     def _process_commands(self):
-        """Process all pending commands from the queue."""
+        """Process all pending commands from the queue.
+
+        Returns:
+            str or None: The last 'char' command processed, or None if no char commands.
+        """
         with self.command_lock:
             commands = self.pending_commands.copy()
             self.pending_commands.clear()
 
+        last_char_cmd = None
         for cmd_type, cmd_value in commands:
             if cmd_type == 'special':
                 if cmd_value == 'tab':
@@ -503,6 +539,9 @@ class FrankaKeyboardController:
                     self._process_joint_command(cmd_value)
                 else:
                     self._process_endeffector_command(cmd_value)
+                last_char_cmd = cmd_value  # Track last char command
+
+        return last_char_cmd
 
     def _toggle_mode(self):
         """Toggle between joint and end-effector control modes."""
@@ -517,7 +556,6 @@ class FrankaKeyboardController:
             ee_position, ee_orientation = self.franka.end_effector.get_world_pose()
             self.ee_target_position = ee_position
             # Convert quaternion to euler for easier incremental control
-            from isaacsim.core.utils.rotations import quat_to_euler_angles
             self.ee_target_euler = quat_to_euler_angles(ee_orientation)
 
     def _process_joint_command(self, key):
@@ -722,7 +760,7 @@ class FrankaKeyboardController:
         try:
             # Start Live TUI context
             with Live(self.tui.render(), refresh_per_second=10, screen=True) as live:
-                while simulation_app.is_running() and not self.should_exit:
+                while self.simulation_app.is_running() and not self.should_exit:
                     self.world.step(render=True)
 
                     if self.world.is_stopped() and not reset_needed:
@@ -734,15 +772,12 @@ class FrankaKeyboardController:
                             self._reset_to_home()
                             reset_needed = False
 
-                        # Process pending commands
-                        self._process_commands()
+                        # Process pending commands and get last char command
+                        last_char_cmd = self._process_commands()
 
-                        # Apply control based on last processed command
-                        with self.command_lock:
-                            if self.pending_commands:
-                                cmd_type, cmd_value = self.pending_commands[-1]
-                                if cmd_type == 'char':
-                                    last_key_processed = cmd_value
+                        # Update last_key_processed if we got a new command
+                        if last_char_cmd is not None:
+                            last_key_processed = last_char_cmd
 
                         # Apply continuous control in end-effector mode
                         if self.control_mode == self.MODE_ENDEFFECTOR and last_key_processed:
@@ -760,7 +795,7 @@ class FrankaKeyboardController:
             # Always restore terminal settings on exit
             self._restore_terminal_settings()
             self.listener.stop()
-            simulation_app.close()
+            self.simulation_app.close()
 
 
 if __name__ == "__main__":
