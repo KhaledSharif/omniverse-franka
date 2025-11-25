@@ -9,6 +9,8 @@ This project implements a standalone Isaac Sim example that allows
 real-time keyboard control of a Franka Panda robot arm with:
 
 - **Dual Control Modes**: Switch between direct joint control and IK-based end-effector control
+- **Demonstration Recording**: Record robot teleoperation for imitation learning with automatic checkpoint saves
+- **Rich Terminal UI**: Real-time status display with recording indicators and visual button feedback
 - **PyInput Integration**: System-wide keyboard capture using pynput library (thread-safe)
 - **Intelligent Workspace Limits**: IK validation prevents movements outside reachable workspace
 - **Incremental Control**: Small, precise position and rotation adjustments
@@ -21,8 +23,25 @@ real-time keyboard control of a Franka Panda robot arm with:
 - Python 3.11 (bundled with Isaac Sim)
 
 ### Run
+
+**Teleoperation only:**
 ```bash
-~/Downloads/isaac-sim-standalone-5.0.0-linux-x86_64/python.sh ./franka_keyboard_control.py
+./run.sh
+```
+
+**Recording demonstrations:**
+```bash
+./record.sh
+```
+
+**Replay recorded demonstrations:**
+```bash
+./replay.sh demos/recording_TIMESTAMP.npz
+```
+
+**Train behavioral cloning model:**
+```bash
+./sb3.sh demos/recording_TIMESTAMP.npz
 ```
 
 The Isaac Sim GUI will launch with the Franka arm loaded. Use keyboard controls immediately.
@@ -110,6 +129,20 @@ The end-effector control mode includes IK validation:
 | `Tab` | Switch between Joint and End-Effector modes |
 | `Esc` | Exit application |
 
+### Recording Controls (when using ./record.sh)
+
+| Key | Action |
+|-----|--------|
+| `` ` `` | Start/Stop recording |
+| `[` | Mark current episode as SUCCESS and finalize |
+| `]` | Mark current episode as FAILURE and finalize |
+
+**Recording features:**
+- **Auto-save every 5 seconds**: Recording data is automatically checkpointed to `demos/recording_TIMESTAMP.npz`
+- **Visual feedback**: Red "● REC" indicator blinks during recording, "SAVED" flash appears during checkpoint
+- **Button press feedback**: Recording control buttons highlight when pressed, just like movement controls
+- **Auto-save on exit**: Press Esc to exit - any pending recording data is automatically finalized and saved
+
 ## Mode Comparison
 
 | Aspect | Joint Control | End-Effector Control |
@@ -189,6 +222,26 @@ Option B - Switch to Joint Mode:
 6. Move to target location (W/A/S/D)
 7. Press E to open gripper and release
 ```
+
+### 5. Recording a Demonstration
+
+**Goal:** Record a pick-and-place demonstration for imitation learning
+
+```
+1. Run ./record.sh to start recording mode
+2. Position robot at starting pose
+3. Press ` (backtick) to start recording
+4. Perform the pick-and-place task
+5. Press [ to mark episode as success (or ] for failure)
+6. Repeat steps 3-5 for multiple episodes
+7. Press Esc to exit - data auto-saves to demos/recording_TIMESTAMP.npz
+```
+
+**Notes:**
+- Recording automatically saves every 5 seconds (checkpoint-style)
+- Watch the left panel for "● REC" indicator (blinks during recording)
+- "SAVED" flash appears when checkpoint occurs
+- All data is preserved even if you don't manually save
 
 ## Technical Implementation
 
@@ -323,3 +376,61 @@ def _validate_ik_solution(self):
 - **Atomic**: Movement either succeeds completely or reverts completely
 - **User-Friendly**: No invalid states, no spammy warnings
 - **Recoverable**: User can immediately try different direction/orientation
+
+## Demonstration Recording System
+
+### Overview
+
+The project includes a complete demonstration recording system for imitation learning:
+
+- **DemoRecorder**: Records (observation, action, reward, done) tuples during teleoperation
+- **Episode Management**: Mark episodes as success/failure, automatic finalization
+- **Auto-Save**: Checkpoint-style saves every 5 seconds to prevent data loss
+- **Rich TUI**: Visual recording indicators, button feedback, status display
+- **Observation Space**: 23D state vector (EE pose, joint state, gripper, cube position)
+- **Action Space**: 7D control vector (EE velocity, angular velocity, gripper)
+
+### Recording Workflow
+
+1. **Start Recording Session**: `./record.sh`
+2. **Control Robot**: Use normal teleoperation controls
+3. **Toggle Recording**: Press `` ` `` to start/stop recording
+4. **Mark Episodes**: Press `[` for success, `]` for failure
+5. **Auto-Save**: Data checkpoints every 5 seconds automatically
+6. **Exit**: Press Esc - final save happens automatically
+
+### Recorded Data Format
+
+NPZ file contains:
+```python
+{
+    'observations': np.ndarray,        # Shape (N, 23)
+    'actions': np.ndarray,             # Shape (N, 7)
+    'rewards': np.ndarray,             # Shape (N,)
+    'dones': np.ndarray,               # Shape (N,)
+    'episode_starts': np.ndarray,      # Episode boundary indices
+    'episode_success': np.ndarray      # Boolean success flags
+}
+```
+
+### Training Behavioral Cloning
+
+Use the recorded demonstrations to train an imitation learning policy:
+
+```bash
+./sb3.sh demos/recording_TIMESTAMP.npz
+```
+
+This trains a behavioral cloning model using the recorded demonstrations and saves the trained policy to `models/`.
+
+### Visual Feedback
+
+When recording is active, the left TUI panel shows:
+- **Status**: "● REC" (blinking red) or "○ IDLE" (dim)
+- **Episode**: Current episode number
+- **Frames**: Number of recorded frames
+- **Controls**: Button feedback (highlights when pressed)
+- **Auto-save**: "SAVED" flash indicator during checkpoint
+- **Last Action**: Most recent command executed
+
+All controls use the same visual button feedback system as the movement controls for consistency.

@@ -1,0 +1,61 @@
+[run]
+source = franka_keyboard_control
+omit =
+    */test_*.py
+    */tests/*
+
+[report]
+# Regexes for lines to exclude from consideration
+exclude_lines =
+    # Have to re-enable the standard pragma
+    pragma: no cover
+
+    # Don't complain about missing debug-only code:
+    def __repr__
+    if self\.debug
+
+    # Don't complain if tests don't hit defensive assertion code:
+    raise AssertionError
+    raise NotImplementedError
+
+    # Don't complain if non-runnable code isn't run:
+    if 0:
+    if False:
+    if __name__ == .__main__.:
+
+    # Don't complain about abstract methods
+    @(abc\.)?abstractmethod
+
+    # Exclude TUI/UI rendering methods (Rich library - presentation layer)
+    class TUIRenderer:
+    def _create_button
+    def _render_endeffector_controls
+    def _render_joint_controls
+    def _render_state_panel
+    def render\(self\):
+
+    # Exclude keyboard event handlers (pynput callbacks - hard to test)
+    def _on_key_press
+    def _on_key_release
+
+    # Exclude terminal settings management (termios - OS-specific)
+    def _disable_terminal_echo
+    def _restore_terminal_settings
+
+    # Exclude main simulation loop (requires full Isaac Sim runtime)
+    def run\(self\):
+
+[coverage:report]
+# Show line numbers of missing statements
+show_missing = True
+
+# Fail if coverage is below this percentage (set after exclusions)
+# fail_under = 85
+
+# Sort by coverage percentage
+sort = Cover
+
+# Omit files from the report
+omit =
+    */test_*.py
+    */tests/*

@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Testing
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+
+# Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Project-specific
+demos/*.npz
+!demos/.gitkeep
+models/*.pt
+models/*.pth
+models/*.zip
+!models/.gitkeep
+
+# Temporary files
+*.tmp
+*.log
+*.bak
+.cache/
+
+# Isaac Sim specific
+*.usd
+*.usda
+*.usdc

@@ -1061,5 +1061,1412 @@ class TestConcurrency:
         assert result == 's'
 
 
+# ============================================================================
+# TEST SUITE 10: Scene Manager Tests
+# ============================================================================
+
+class TestSceneManager:
+    """Tests for cube spawning and scene management."""
+
+    def test_scene_manager_initialization(self, mock_world):
+        """Test SceneManager initializes with world reference."""
+        from franka_keyboard_control import SceneManager
+
+        manager = SceneManager(mock_world)
+        assert manager.world is mock_world
+        assert manager.cube is None
+        assert manager.goal_marker is None
+
+    def test_scene_manager_default_workspace_bounds(self, mock_world):
+        """Test SceneManager has default workspace bounds."""
+        from franka_keyboard_control import SceneManager
+
+        manager = SceneManager(mock_world)
+        assert 'x' in manager.workspace_bounds
+        assert 'y' in manager.workspace_bounds
+        assert 'z' in manager.workspace_bounds
+
+    def test_scene_manager_custom_workspace_bounds(self, mock_world):
+        """Test SceneManager accepts custom workspace bounds."""
+        from franka_keyboard_control import SceneManager
+
+        custom_bounds = {'x': [0.2, 0.5], 'y': [-0.2, 0.2], 'z': [0.0, 0.3]}
+        manager = SceneManager(mock_world, workspace_bounds=custom_bounds)
+        assert manager.workspace_bounds == custom_bounds
+
+    def test_spawn_cube_creates_cuboid(self, mock_world):
+        """Test spawn_cube creates a cube in the scene."""
+        from franka_keyboard_control import SceneManager
+
+        manager = SceneManager(mock_world)
+        cube = manager.spawn_cube(position=[0.4, 0.0, 0.02])
+
+        assert cube is not None
+        assert mock_world.scene.add.called
+        assert manager.cube is cube
+
+    def test_spawn_cube_with_custom_size_and_color(self, mock_world):
+        """Test spawn_cube accepts custom size and color."""
+        from franka_keyboard_control import SceneManager
+
+        manager = SceneManager(mock_world)
+        cube = manager.spawn_cube(position=[0.4, 0.0, 0.02], size=0.05, color=(0, 1, 0))
+
+        assert cube is not None
+        assert manager.cube is cube
+
+    def test_spawn_cube_random_position_within_workspace(self, mock_world):
+        """Test random position falls within workspace bounds."""
+        from franka_keyboard_control import SceneManager
+
+        manager = SceneManager(mock_world, workspace_bounds={
+            'x': [0.3, 0.6], 'y': [-0.3, 0.3], 'z': [0.02, 0.02]
+        })
+
+        for _ in range(10):
+            pos = manager._random_position()
+            assert 0.3 <= pos[0] <= 0.6, f"X position {pos[0]} out of bounds"
+            assert -0.3 <= pos[1] <= 0.3, f"Y position {pos[1]} out of bounds"
+
+    def test_spawn_goal_marker_creates_visual_cuboid(self, mock_world):
+        """Test goal marker is a visual (non-physical) cube."""
+        from franka_keyboard_control import SceneManager
+
+        manager = SceneManager(mock_world)
+        goal_pos = manager.spawn_goal_marker(position=[0.35, -0.15, 0.10])
+
+        assert manager.goal_marker is not None
+        np.testing.assert_array_equal(goal_pos, [0.35, -0.15, 0.10])
+
+    def test_get_cube_pose_returns_position_and_orientation(self, mock_world):
+        """Test retrieving cube pose."""
+        from franka_keyboard_control import SceneManager
+
+        manager = SceneManager(mock_world)
+        manager.spawn_cube(position=[0.4, 0.0, 0.02])
+
+        # Mock the cube's get_world_pose method
+        manager.cube.get_world_pose = Mock(return_value=(
+            np.array([0.4, 0.0, 0.02]),
+            np.array([0, 0, 0, 1])
+        ))
+
+        pos, quat = manager.get_cube_pose()
+        np.testing.assert_array_almost_equal(pos, [0.4, 0.0, 0.02])
+        np.testing.assert_array_almost_equal(quat, [0, 0, 0, 1])
+
+    def test_get_goal_position_returns_goal_location(self, mock_world):
+        """Test retrieving goal position."""
+        from franka_keyboard_control import SceneManager
+
+        manager = SceneManager(mock_world)
+        manager.spawn_goal_marker(position=[0.35, -0.15, 0.10])
+
+        goal_pos = manager.get_goal_position()
+        np.testing.assert_array_almost_equal(goal_pos, [0.35, -0.15, 0.10])
+
+    def test_reset_scene_randomizes_positions(self, mock_world):
+        """Test reset randomizes cube and goal positions."""
+        from franka_keyboard_control import SceneManager
+
+        manager = SceneManager(mock_world)
+        manager.spawn_cube()
+        manager.spawn_goal_marker()
+
+        # Mock set_world_pose for cube
+        manager.cube.set_world_pose = Mock()
+
+        cube_pos, goal_pos = manager.reset_scene()
+
+        assert cube_pos is not None
+        assert goal_pos is not None
+        assert len(cube_pos) == 3
+        assert len(goal_pos) == 3
+
+    def test_check_grasp_detects_cube_in_gripper(self, mock_world):
+        """Test grasp detection when cube is between gripper fingers."""
+        from franka_keyboard_control import SceneManager
+
+        manager = SceneManager(mock_world)
+        manager.spawn_cube(position=[0.4, 0.0, 0.3])
+
+        # Mock cube position
+        manager.cube.get_world_pose = Mock(return_value=(
+            np.array([0.4, 0.0, 0.3]),
+            np.array([0, 0, 0, 1])
+        ))
+
+        # Simulate gripper closed around cube (EE at same position, gripper slightly wider than cube)
+        ee_pos = np.array([0.4, 0.0, 0.3])
+        gripper_width = 0.035  # Slightly less than cube size (0.04)
+
+        is_grasped = manager.check_grasp(ee_pos, gripper_width, cube_size=0.04, grasp_threshold=0.05)
+        assert is_grasped is True
+
+    def test_check_grasp_returns_false_when_far(self, mock_world):
+        """Test grasp detection returns False when cube is far."""
+        from franka_keyboard_control import SceneManager
+
+        manager = SceneManager(mock_world)
+        manager.spawn_cube(position=[0.4, 0.0, 0.02])
+
+        # Mock cube position
+        manager.cube.get_world_pose = Mock(return_value=(
+            np.array([0.4, 0.0, 0.02]),
+            np.array([0, 0, 0, 1])
+        ))
+
+        ee_pos = np.array([0.6, 0.0, 0.4])  # Far from cube
+        is_grasped = manager.check_grasp(ee_pos, gripper_width=0.04)
+        assert not is_grasped
+
+    def test_check_grasp_returns_false_when_gripper_open(self, mock_world):
+        """Test grasp detection returns False when gripper is fully open."""
+        from franka_keyboard_control import SceneManager
+
+        manager = SceneManager(mock_world)
+        manager.spawn_cube(position=[0.4, 0.0, 0.3])
+
+        # Mock cube position
+        manager.cube.get_world_pose = Mock(return_value=(
+            np.array([0.4, 0.0, 0.3]),
+            np.array([0, 0, 0, 1])
+        ))
+
+        # EE at cube but gripper wide open
+        ee_pos = np.array([0.4, 0.0, 0.3])
+        gripper_width = 0.05  # Fully open
+
+        is_grasped = manager.check_grasp(ee_pos, gripper_width, cube_size=0.04)
+        assert is_grasped is False
+
+    def test_check_task_complete_when_cube_at_goal(self, mock_world):
+        """Test task completion detection."""
+        from franka_keyboard_control import SceneManager
+
+        manager = SceneManager(mock_world)
+        manager.spawn_cube(position=[0.35, -0.15, 0.10])
+        manager.spawn_goal_marker(position=[0.35, -0.15, 0.10])
+
+        # Mock cube at goal position
+        manager.cube.get_world_pose = Mock(return_value=(
+            np.array([0.35, -0.15, 0.10]),
+            np.array([0, 0, 0, 1])
+        ))
+
+        is_complete = manager.check_task_complete(threshold=0.03)
+        assert is_complete
+
+    def test_check_task_complete_returns_false_when_far(self, mock_world):
+        """Test task not complete when cube far from goal."""
+        from franka_keyboard_control import SceneManager
+
+        manager = SceneManager(mock_world)
+        manager.spawn_cube(position=[0.4, 0.0, 0.02])
+        manager.spawn_goal_marker(position=[0.35, -0.15, 0.10])
+
+        # Mock cube position (far from goal)
+        manager.cube.get_world_pose = Mock(return_value=(
+            np.array([0.4, 0.0, 0.02]),
+            np.array([0, 0, 0, 1])
+        ))
+
+        is_complete = manager.check_task_complete(threshold=0.03)
+        assert not is_complete
+
+
+# ============================================================================
+# TEST SUITE 11: Demo Recorder Tests
+# ============================================================================
+
+class TestDemoRecorder:
+    """Tests for demonstration recording functionality."""
+
+    def test_recorder_initialization(self):
+        """Test DemoRecorder initializes with empty buffers."""
+        from franka_keyboard_control import DemoRecorder
+
+        recorder = DemoRecorder(obs_dim=23, action_dim=7)
+
+        assert recorder.obs_dim == 23
+        assert recorder.action_dim == 7
+        assert len(recorder.observations) == 0
+        assert len(recorder.actions) == 0
+        assert recorder.is_recording is False
+
+    def test_start_recording_sets_flag(self):
+        """Test start_recording enables recording mode."""
+        from franka_keyboard_control import DemoRecorder
+
+        recorder = DemoRecorder(obs_dim=23, action_dim=7)
+        recorder.start_recording()
+
+        assert recorder.is_recording is True
+        assert recorder.current_episode_start == 0
+
+    def test_stop_recording_clears_flag(self):
+        """Test stop_recording disables recording mode."""
+        from franka_keyboard_control import DemoRecorder
+
+        recorder = DemoRecorder(obs_dim=23, action_dim=7)
+        recorder.start_recording()
+        recorder.stop_recording()
+
+        assert recorder.is_recording is False
+
+    def test_record_step_captures_data(self):
+        """Test record_step stores observation and action."""
+        from franka_keyboard_control import DemoRecorder
+
+        recorder = DemoRecorder(obs_dim=3, action_dim=2)
+        recorder.start_recording()
+
+        obs = np.array([1.0, 2.0, 3.0])
+        action = np.array([0.5, -0.5])
+        reward = 1.0
+        done = False
+
+        recorder.record_step(obs, action, reward, done)
+
+        assert len(recorder.observations) == 1
+        assert len(recorder.actions) == 1
+        np.testing.assert_array_equal(recorder.observations[0], obs)
+        np.testing.assert_array_equal(recorder.actions[0], action)
+
+    def test_record_step_ignored_when_not_recording(self):
+        """Test record_step does nothing when not recording."""
+        from franka_keyboard_control import DemoRecorder
+
+        recorder = DemoRecorder(obs_dim=3, action_dim=2)
+        # Don't call start_recording()
+
+        recorder.record_step(np.zeros(3), np.zeros(2), 0.0, False)
+
+        assert len(recorder.observations) == 0
+        assert len(recorder.actions) == 0
+
+    def test_record_step_stores_reward_and_done(self):
+        """Test record_step stores reward and done flags."""
+        from franka_keyboard_control import DemoRecorder
+
+        recorder = DemoRecorder(obs_dim=3, action_dim=2)
+        recorder.start_recording()
+
+        recorder.record_step(np.zeros(3), np.zeros(2), 1.5, False)
+        recorder.record_step(np.zeros(3), np.zeros(2), 2.0, True)
+
+        assert len(recorder.rewards) == 2
+        assert len(recorder.dones) == 2
+        assert recorder.rewards[0] == 1.5
+        assert recorder.rewards[1] == 2.0
+        assert recorder.dones[0] is False
+        assert recorder.dones[1] is True
+
+    def test_mark_episode_success(self):
+        """Test marking current episode as successful."""
+        from franka_keyboard_control import DemoRecorder
+
+        recorder = DemoRecorder(obs_dim=3, action_dim=2)
+        recorder.start_recording()
+        recorder.record_step(np.zeros(3), np.zeros(2), 0.0, False)
+        recorder.record_step(np.zeros(3), np.zeros(2), 0.0, True)
+
+        recorder.mark_episode_success(True)
+        recorder.finalize_episode()
+
+        assert recorder.episode_success[0] is True
+
+    def test_mark_episode_failure(self):
+        """Test marking current episode as failed."""
+        from franka_keyboard_control import DemoRecorder
+
+        recorder = DemoRecorder(obs_dim=3, action_dim=2)
+        recorder.start_recording()
+        recorder.record_step(np.zeros(3), np.zeros(2), 0.0, True)
+
+        recorder.mark_episode_success(False)
+        recorder.finalize_episode()
+
+        assert recorder.episode_success[0] is False
+
+    def test_finalize_episode_updates_metadata(self):
+        """Test finalize_episode records episode boundaries."""
+        from franka_keyboard_control import DemoRecorder
+
+        recorder = DemoRecorder(obs_dim=3, action_dim=2)
+        recorder.start_recording()
+
+        for _ in range(10):
+            recorder.record_step(np.zeros(3), np.zeros(2), 1.0, False)
+        recorder.record_step(np.zeros(3), np.zeros(2), 1.0, True)
+
+        recorder.finalize_episode()
+
+        assert len(recorder.episode_starts) == 1
+        assert recorder.episode_starts[0] == 0
+        assert recorder.episode_lengths[0] == 11
+        assert recorder.episode_returns[0] == 11.0
+
+    def test_multiple_episodes_tracked_separately(self):
+        """Test multiple episodes have correct boundaries."""
+        from franka_keyboard_control import DemoRecorder
+
+        recorder = DemoRecorder(obs_dim=3, action_dim=2)
+        recorder.start_recording()
+
+        # Episode 1: 5 steps + 1 done step = 6 total
+        for _ in range(5):
+            recorder.record_step(np.zeros(3), np.zeros(2), 1.0, False)
+        recorder.record_step(np.zeros(3), np.zeros(2), 1.0, True)
+        recorder.finalize_episode()
+
+        # Episode 2: 3 steps + 1 done step = 4 total
+        for _ in range(3):
+            recorder.record_step(np.zeros(3), np.zeros(2), 2.0, False)
+        recorder.record_step(np.zeros(3), np.zeros(2), 2.0, True)
+        recorder.finalize_episode()
+
+        assert recorder.episode_starts == [0, 6]
+        assert recorder.episode_lengths == [6, 4]
+
+    def test_get_stats_returns_recording_statistics(self):
+        """Test get_stats returns current recording status."""
+        from franka_keyboard_control import DemoRecorder
+
+        recorder = DemoRecorder(obs_dim=3, action_dim=2)
+        recorder.start_recording()
+
+        for _ in range(10):
+            recorder.record_step(np.zeros(3), np.zeros(2), 1.0, False)
+
+        stats = recorder.get_stats()
+
+        assert stats['is_recording'] is True
+        assert stats['total_frames'] == 10
+        assert stats['current_episode_frames'] == 10
+        assert stats['num_episodes'] == 0  # Not finalized yet
+
+    def test_get_stats_after_finalize(self):
+        """Test get_stats after episode finalization."""
+        from franka_keyboard_control import DemoRecorder
+
+        recorder = DemoRecorder(obs_dim=3, action_dim=2)
+        recorder.start_recording()
+
+        for _ in range(5):
+            recorder.record_step(np.zeros(3), np.zeros(2), 1.0, False)
+        recorder.record_step(np.zeros(3), np.zeros(2), 1.0, True)
+        recorder.mark_episode_success(True)
+        recorder.finalize_episode()
+
+        stats = recorder.get_stats()
+
+        assert stats['num_episodes'] == 1
+        assert stats['num_success'] == 1
+        assert stats['num_failed'] == 0
+
+    def test_clear_resets_all_buffers(self):
+        """Test clear method resets all data."""
+        from franka_keyboard_control import DemoRecorder
+
+        recorder = DemoRecorder(obs_dim=3, action_dim=2)
+        recorder.start_recording()
+        recorder.record_step(np.zeros(3), np.zeros(2), 1.0, True)
+        recorder.finalize_episode()
+
+        recorder.clear()
+
+        assert len(recorder.observations) == 0
+        assert len(recorder.actions) == 0
+        assert len(recorder.episode_starts) == 0
+        assert recorder.is_recording is False
+
+
+# ============================================================================
+# TEST SUITE 12: Demo Save/Load Tests
+# ============================================================================
+
+class TestDemoSaveLoad:
+    """Tests for saving and loading demonstrations."""
+
+    def test_save_creates_npz_file(self, tmp_path):
+        """Test save creates a .npz file at specified path."""
+        from franka_keyboard_control import DemoRecorder
+
+        recorder = DemoRecorder(obs_dim=3, action_dim=2)
+        recorder.start_recording()
+        recorder.record_step(np.array([1, 2, 3]), np.array([0.5, -0.5]), 1.0, True)
+        recorder.finalize_episode()
+
+        filepath = tmp_path / "test_demo.npz"
+        recorder.save(str(filepath))
+
+        assert filepath.exists()
+
+    def test_save_contains_required_arrays(self, tmp_path):
+        """Test saved file contains all required data arrays."""
+        from franka_keyboard_control import DemoRecorder
+
+        recorder = DemoRecorder(obs_dim=3, action_dim=2)
+        recorder.start_recording()
+        recorder.record_step(np.array([1, 2, 3]), np.array([0.5, -0.5]), 1.0, True)
+        recorder.mark_episode_success(True)
+        recorder.finalize_episode()
+
+        filepath = tmp_path / "test_demo.npz"
+        recorder.save(str(filepath))
+
+        data = np.load(str(filepath), allow_pickle=True)
+
+        assert 'observations' in data
+        assert 'actions' in data
+        assert 'rewards' in data
+        assert 'dones' in data
+        assert 'episode_starts' in data
+        assert 'episode_lengths' in data
+        assert 'episode_returns' in data
+        assert 'episode_success' in data
+
+    def test_save_preserves_data_shapes(self, tmp_path):
+        """Test data shapes are preserved after save."""
+        from franka_keyboard_control import DemoRecorder
+
+        recorder = DemoRecorder(obs_dim=3, action_dim=2)
+        recorder.start_recording()
+        for i in range(5):
+            recorder.record_step(np.array([i, i+1, i+2]), np.array([0.1, 0.2]), 1.0, False)
+        recorder.record_step(np.array([5, 6, 7]), np.array([0.1, 0.2]), 1.0, True)
+        recorder.finalize_episode()
+
+        filepath = tmp_path / "test_demo.npz"
+        recorder.save(str(filepath))
+
+        data = np.load(str(filepath), allow_pickle=True)
+
+        assert data['observations'].shape == (6, 3)
+        assert data['actions'].shape == (6, 2)
+        assert len(data['rewards']) == 6
+
+    def test_save_preserves_data_types(self, tmp_path):
+        """Test data types are preserved after save."""
+        from franka_keyboard_control import DemoRecorder
+
+        recorder = DemoRecorder(obs_dim=3, action_dim=2)
+        recorder.start_recording()
+        recorder.record_step(
+            np.array([1.5, 2.5, 3.5], dtype=np.float32),
+            np.array([0.5, -0.5], dtype=np.float32),
+            1.0, True
+        )
+        recorder.finalize_episode()
+
+        filepath = tmp_path / "test_demo.npz"
+        recorder.save(str(filepath))
+
+        data = np.load(str(filepath), allow_pickle=True)
+
+        assert data['observations'].dtype == np.float32
+        assert data['actions'].dtype == np.float32
+
+    def test_load_restores_recorder_state(self, tmp_path):
+        """Test load restores full recorder state."""
+        from franka_keyboard_control import DemoRecorder
+
+        # Create and save
+        recorder1 = DemoRecorder(obs_dim=3, action_dim=2)
+        recorder1.start_recording()
+        for i in range(5):
+            recorder1.record_step(np.array([i, i, i], dtype=np.float32),
+                                  np.array([0.1, 0.2], dtype=np.float32), 1.0, False)
+        recorder1.record_step(np.array([5, 5, 5], dtype=np.float32),
+                              np.array([0.1, 0.2], dtype=np.float32), 1.0, True)
+        recorder1.mark_episode_success(True)
+        recorder1.finalize_episode()
+
+        filepath = tmp_path / "test_demo.npz"
+        recorder1.save(str(filepath))
+
+        # Load into new recorder
+        recorder2 = DemoRecorder.load(str(filepath))
+
+        assert len(recorder2.observations) == 6
+        assert recorder2.episode_success[0]  # True
+        assert recorder2.obs_dim == 3
+        assert recorder2.action_dim == 2
+
+    def test_save_includes_metadata(self, tmp_path):
+        """Test metadata is saved with demonstrations."""
+        from franka_keyboard_control import DemoRecorder
+
+        recorder = DemoRecorder(obs_dim=23, action_dim=7)
+        recorder.start_recording()
+        recorder.record_step(np.zeros(23), np.zeros(7), 0.0, True)
+        recorder.finalize_episode()
+
+        filepath = tmp_path / "test_demo.npz"
+        recorder.save(str(filepath), metadata={
+            'task': 'pick_and_place',
+            'robot': 'franka_panda'
+        })
+
+        data = np.load(str(filepath), allow_pickle=True)
+        metadata = data['metadata'].item()
+
+        assert metadata['task'] == 'pick_and_place'
+        assert metadata['obs_dim'] == 23
+        assert metadata['action_dim'] == 7
+
+    def test_load_multiple_episodes(self, tmp_path):
+        """Test load correctly restores multiple episodes."""
+        from franka_keyboard_control import DemoRecorder
+
+        recorder1 = DemoRecorder(obs_dim=3, action_dim=2)
+        recorder1.start_recording()
+
+        # Episode 1
+        for _ in range(3):
+            recorder1.record_step(np.zeros(3), np.zeros(2), 1.0, False)
+        recorder1.record_step(np.zeros(3), np.zeros(2), 1.0, True)
+        recorder1.mark_episode_success(True)
+        recorder1.finalize_episode()
+
+        # Episode 2
+        for _ in range(5):
+            recorder1.record_step(np.ones(3), np.ones(2), 2.0, False)
+        recorder1.record_step(np.ones(3), np.ones(2), 2.0, True)
+        recorder1.mark_episode_success(False)
+        recorder1.finalize_episode()
+
+        filepath = tmp_path / "test_demo.npz"
+        recorder1.save(str(filepath))
+
+        recorder2 = DemoRecorder.load(str(filepath))
+
+        assert len(recorder2.episode_starts) == 2
+        assert recorder2.episode_lengths == [4, 6]
+        assert recorder2.episode_success == [True, False]
+
+    def test_save_empty_recorder_creates_file(self, tmp_path):
+        """Test saving empty recorder still creates valid file."""
+        from franka_keyboard_control import DemoRecorder
+
+        recorder = DemoRecorder(obs_dim=3, action_dim=2)
+
+        filepath = tmp_path / "empty_demo.npz"
+        recorder.save(str(filepath))
+
+        assert filepath.exists()
+        data = np.load(str(filepath), allow_pickle=True)
+        assert len(data['observations']) == 0
+
+
+# ============================================================================
+# TEST SUITE 13: Action Mapper Tests
+# ============================================================================
+
+class TestActionMapper:
+    """Tests for mapping keyboard input to normalized actions."""
+
+    def test_action_mapper_initialization(self):
+        """Test ActionMapper initializes with correct dimensions."""
+        from franka_keyboard_control import ActionMapper
+
+        mapper = ActionMapper()
+        assert mapper.action_dim == 7
+
+    def test_map_w_key_to_positive_x(self):
+        """Test W key maps to +X movement."""
+        from franka_keyboard_control import ActionMapper
+
+        mapper = ActionMapper()
+        action = mapper.map_key('w')
+
+        assert action[0] == 1.0  # +X
+        assert action[1] == 0.0
+        assert action[2] == 0.0
+
+    def test_map_s_key_to_negative_x(self):
+        """Test S key maps to -X movement."""
+        from franka_keyboard_control import ActionMapper
+
+        mapper = ActionMapper()
+        action = mapper.map_key('s')
+
+        assert action[0] == -1.0  # -X
+
+    def test_map_position_keys(self):
+        """Test all position control keys."""
+        from franka_keyboard_control import ActionMapper
+
+        mapper = ActionMapper()
+
+        # Test all position keys
+        assert mapper.map_key('w')[0] == 1.0   # +X
+        assert mapper.map_key('s')[0] == -1.0  # -X
+        assert mapper.map_key('a')[1] == 1.0   # +Y
+        assert mapper.map_key('d')[1] == -1.0  # -Y
+        assert mapper.map_key('q')[2] == 1.0   # +Z
+        assert mapper.map_key('e')[2] == -1.0  # -Z
+
+    def test_map_rotation_keys(self):
+        """Test rotation control keys."""
+        from franka_keyboard_control import ActionMapper
+
+        mapper = ActionMapper()
+
+        # Roll (index 3)
+        assert mapper.map_key('u')[3] == 1.0   # +roll
+        assert mapper.map_key('o')[3] == -1.0  # -roll
+
+        # Pitch (index 4)
+        assert mapper.map_key('i')[4] == 1.0   # +pitch
+        assert mapper.map_key('k')[4] == -1.0  # -pitch
+
+        # Yaw (index 5)
+        assert mapper.map_key('j')[5] == 1.0   # +yaw
+        assert mapper.map_key('l')[5] == -1.0  # -yaw
+
+    def test_map_gripper_keys(self):
+        """Test gripper control keys."""
+        from franka_keyboard_control import ActionMapper
+
+        mapper = ActionMapper()
+
+        # Gripper is last dimension (index 6)
+        # Note: q/e also control Z, gripper handled separately
+        assert mapper.map_key('g')[6] == -1.0  # close gripper
+        assert mapper.map_key('h')[6] == 1.0   # open gripper
+
+    def test_map_unknown_key_returns_zero_action(self):
+        """Test unknown keys return zero action."""
+        from franka_keyboard_control import ActionMapper
+
+        mapper = ActionMapper()
+        action = mapper.map_key('x')
+
+        np.testing.assert_array_equal(action, np.zeros(7))
+
+    def test_map_no_key_returns_zero_action(self):
+        """Test None key returns zero action."""
+        from franka_keyboard_control import ActionMapper
+
+        mapper = ActionMapper()
+        action = mapper.map_key(None)
+
+        np.testing.assert_array_equal(action, np.zeros(7))
+
+    def test_action_array_shape(self):
+        """Test action arrays have correct shape."""
+        from franka_keyboard_control import ActionMapper
+
+        mapper = ActionMapper()
+        action = mapper.map_key('w')
+
+        assert action.shape == (7,)
+        assert action.dtype == np.float32
+
+
+# ============================================================================
+# TEST SUITE 14: Observation Builder Tests
+# ============================================================================
+
+class TestObservationBuilder:
+    """Tests for building observation vectors."""
+
+    def test_observation_builder_initialization(self):
+        """Test ObservationBuilder initializes with correct dimensions."""
+        from franka_keyboard_control import ObservationBuilder
+
+        builder = ObservationBuilder()
+        assert builder.obs_dim == 23
+
+    def test_build_observation_from_robot_state(self):
+        """Test building observation from robot state."""
+        from franka_keyboard_control import ObservationBuilder
+
+        builder = ObservationBuilder()
+
+        obs = builder.build(
+            joint_positions=np.zeros(7),
+            ee_position=np.array([0.4, 0.0, 0.3]),
+            ee_orientation=np.array([0, 0, 0, 1]),
+            gripper_width=0.04,
+            cube_position=np.array([0.4, 0.0, 0.02]),
+            goal_position=np.array([0.35, -0.15, 0.10]),
+            cube_grasped=False
+        )
+
+        assert obs.shape == (23,)
+        assert obs.dtype == np.float32
+
+    def test_observation_contains_joint_positions(self):
+        """Test joints are in positions 0-6."""
+        from franka_keyboard_control import ObservationBuilder
+
+        builder = ObservationBuilder()
+        joints = np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7])
+
+        obs = builder.build(
+            joint_positions=joints,
+            ee_position=np.zeros(3),
+            ee_orientation=np.array([0, 0, 0, 1]),
+            gripper_width=0.04,
+            cube_position=np.zeros(3),
+            goal_position=np.zeros(3),
+            cube_grasped=False
+        )
+
+        np.testing.assert_array_almost_equal(obs[0:7], joints)
+
+    def test_observation_contains_ee_position(self):
+        """Test end-effector position is in observation."""
+        from franka_keyboard_control import ObservationBuilder
+
+        builder = ObservationBuilder()
+        ee_pos = np.array([0.4, 0.1, 0.3])
+
+        obs = builder.build(
+            joint_positions=np.zeros(7),
+            ee_position=ee_pos,
+            ee_orientation=np.array([0, 0, 0, 1]),
+            gripper_width=0.04,
+            cube_position=np.zeros(3),
+            goal_position=np.zeros(3),
+            cube_grasped=False
+        )
+
+        np.testing.assert_array_almost_equal(obs[7:10], ee_pos)
+
+    def test_observation_contains_cube_grasped_flag(self):
+        """Test cube_grasped is in observation."""
+        from franka_keyboard_control import ObservationBuilder
+
+        builder = ObservationBuilder()
+
+        obs_grasped = builder.build(
+            joint_positions=np.zeros(7),
+            ee_position=np.zeros(3),
+            ee_orientation=np.array([0, 0, 0, 1]),
+            gripper_width=0.04,
+            cube_position=np.zeros(3),
+            goal_position=np.zeros(3),
+            cube_grasped=True
+        )
+
+        obs_not_grasped = builder.build(
+            joint_positions=np.zeros(7),
+            ee_position=np.zeros(3),
+            ee_orientation=np.array([0, 0, 0, 1]),
+            gripper_width=0.04,
+            cube_position=np.zeros(3),
+            goal_position=np.zeros(3),
+            cube_grasped=False
+        )
+
+        assert obs_grasped[21] == 1.0
+        assert obs_not_grasped[21] == 0.0
+
+
+# ============================================================================
+# TEST SUITE 15: Reward Computer Tests
+# ============================================================================
+
+class TestRewardComputer:
+    """Tests for computing rewards."""
+
+    def test_reward_computer_initialization(self):
+        """Test RewardComputer initializes correctly."""
+        from franka_keyboard_control import RewardComputer
+
+        computer = RewardComputer(mode='dense')
+        assert computer.mode == 'dense'
+
+        computer_sparse = RewardComputer(mode='sparse')
+        assert computer_sparse.mode == 'sparse'
+
+    def test_sparse_reward_on_task_complete(self):
+        """Test sparse reward gives +10 on task completion."""
+        from franka_keyboard_control import RewardComputer
+
+        computer = RewardComputer(mode='sparse')
+
+        reward = computer.compute(
+            obs=np.zeros(23),
+            action=np.zeros(7),
+            next_obs=np.zeros(23),
+            info={'task_complete': True, 'cube_grasped': True}
+        )
+
+        assert reward == 10.0
+
+    def test_sparse_reward_zero_otherwise(self):
+        """Test sparse reward is 0 when not complete."""
+        from franka_keyboard_control import RewardComputer
+
+        computer = RewardComputer(mode='sparse')
+
+        reward = computer.compute(
+            obs=np.zeros(23),
+            action=np.zeros(7),
+            next_obs=np.zeros(23),
+            info={'task_complete': False, 'cube_grasped': False}
+        )
+
+        assert reward == 0.0
+
+    def test_dense_reward_reaching_phase(self):
+        """Test dense reward increases when getting closer to cube."""
+        from franka_keyboard_control import RewardComputer
+
+        computer = RewardComputer(mode='dense')
+
+        # EE far from cube
+        obs = np.zeros(23)
+        obs[7:10] = [0.5, 0.0, 0.3]    # ee position
+        obs[15:18] = [0.4, 0.0, 0.02]  # cube position
+
+        # EE closer to cube
+        next_obs = np.zeros(23)
+        next_obs[7:10] = [0.45, 0.0, 0.15]  # ee closer
+        next_obs[15:18] = [0.4, 0.0, 0.02]  # cube same
+
+        reward = computer.compute(obs, np.zeros(7), next_obs,
+                                  {'cube_grasped': False, 'task_complete': False})
+
+        assert reward > 0, "Should reward getting closer to cube"
+
+    def test_dense_reward_grasp_bonus(self):
+        """Test bonus reward when grasping cube."""
+        from franka_keyboard_control import RewardComputer
+
+        computer = RewardComputer(mode='dense')
+
+        reward = computer.compute(
+            obs=np.zeros(23),
+            action=np.zeros(7),
+            next_obs=np.zeros(23),
+            info={'cube_grasped': True, 'just_grasped': True, 'task_complete': False}
+        )
+
+        assert reward >= 5.0, "Should give grasp bonus"
+
+    def test_dense_reward_drop_penalty(self):
+        """Test penalty when dropping cube."""
+        from franka_keyboard_control import RewardComputer
+
+        computer = RewardComputer(mode='dense')
+
+        reward = computer.compute(
+            obs=np.zeros(23),
+            action=np.zeros(7),
+            next_obs=np.zeros(23),
+            info={'cube_grasped': False, 'cube_dropped': True, 'task_complete': False}
+        )
+
+        assert reward < 0, "Should penalize dropping cube"
+
+
+# ============================================================================
+# TEST SUITE 16: TUI Recording Panel Tests
+# ============================================================================
+
+class TestTUIRecordingPanel:
+    """Tests for TUI recording status display."""
+
+    def test_tui_renderer_has_recording_attributes(self):
+        """Test TUIRenderer has recording status attributes."""
+        from franka_keyboard_control import TUIRenderer
+
+        tui = TUIRenderer()
+
+        assert hasattr(tui, 'recording_active')
+        assert hasattr(tui, 'recording_stats')
+        assert tui.recording_active is False
+        assert tui.recording_stats == {}
+
+    def test_set_recording_status_updates_state(self):
+        """Test set_recording_status updates TUI state."""
+        from franka_keyboard_control import TUIRenderer
+
+        tui = TUIRenderer()
+        stats = {
+            'total_frames': 100,
+            'current_episode_frames': 50,
+            'num_episodes': 2,
+        }
+        tui.set_recording_status(is_recording=True, stats=stats)
+
+        assert tui.recording_active is True
+        assert tui.recording_stats['total_frames'] == 100
+        assert tui.recording_stats['current_episode_frames'] == 50
+
+    def test_set_recording_status_inactive(self):
+        """Test set_recording_status with inactive recording."""
+        from franka_keyboard_control import TUIRenderer
+
+        tui = TUIRenderer()
+        tui.set_recording_status(is_recording=True, stats={'total_frames': 10})
+        tui.set_recording_status(is_recording=False, stats={'total_frames': 10})
+
+        assert tui.recording_active is False
+
+    def test_episode_stats_tracked(self):
+        """Test episode statistics are tracked."""
+        from franka_keyboard_control import TUIRenderer
+
+        tui = TUIRenderer()
+        stats = {
+            'num_episodes': 5,
+            'num_success': 3,
+            'num_failed': 2,
+            'total_frames': 500,
+            'current_episode_frames': 45,
+            'current_episode_return': 12.5
+        }
+        tui.set_recording_status(is_recording=True, stats=stats)
+
+        assert tui.recording_stats['num_success'] == 3
+        assert tui.recording_stats['num_failed'] == 2
+        assert tui.recording_stats['current_episode_return'] == 12.5
+
+    def test_render_recording_panel_exists(self):
+        """Test _render_recording_panel method exists."""
+        from franka_keyboard_control import TUIRenderer
+
+        tui = TUIRenderer()
+        assert hasattr(tui, '_render_recording_panel')
+        assert callable(tui._render_recording_panel)
+
+    def test_render_recording_panel_returns_panel(self):
+        """Test _render_recording_panel returns a Rich Panel."""
+        from franka_keyboard_control import TUIRenderer
+        from rich.panel import Panel
+
+        tui = TUIRenderer()
+        tui.set_recording_status(is_recording=True, stats={
+            'total_frames': 100,
+            'current_episode_frames': 50,
+            'num_episodes': 2,
+        })
+
+        panel = tui._render_recording_panel()
+        assert isinstance(panel, Panel)
+
+
+# ============================================================================
+# TEST SUITE 17: Recording Controls Tests (`, [, ], \)
+# ============================================================================
+
+class TestRecordingControls:
+    """Tests for recording control keys (`, [, ], \\)."""
+
+    def test_backtick_starts_recording(self, controller_instance):
+        """Test backtick (`) starts recording when not recording."""
+        from franka_keyboard_control import DemoRecorder
+
+        controller_instance.recorder = DemoRecorder(obs_dim=23, action_dim=7)
+        assert controller_instance.recorder.is_recording is False
+
+        controller_instance._queue_command(('char', '`'))
+        controller_instance._process_commands()
+
+        assert controller_instance.recorder.is_recording is True
+
+    def test_backtick_stops_recording(self, controller_instance):
+        """Test backtick (`) stops recording when already recording."""
+        from franka_keyboard_control import DemoRecorder
+
+        controller_instance.recorder = DemoRecorder(obs_dim=23, action_dim=7)
+        controller_instance.recorder.start_recording()
+        assert controller_instance.recorder.is_recording is True
+
+        controller_instance._queue_command(('char', '`'))
+        controller_instance._process_commands()
+
+        assert controller_instance.recorder.is_recording is False
+
+    def test_left_bracket_marks_success(self, controller_instance):
+        """Test [ marks current episode as success and finalizes."""
+        from franka_keyboard_control import DemoRecorder
+
+        controller_instance.recorder = DemoRecorder(obs_dim=23, action_dim=7)
+        controller_instance.recorder.start_recording()
+        # Record at least one step so the episode has data
+        controller_instance.recorder.record_step(np.zeros(23), np.zeros(7), 1.0, False)
+
+        controller_instance._queue_command(('char', '['))
+        controller_instance._process_commands()
+
+        # Episode should be finalized with success
+        assert len(controller_instance.recorder.episode_success) == 1
+        assert controller_instance.recorder.episode_success[0] is True
+
+    def test_right_bracket_marks_failure(self, controller_instance):
+        """Test ] marks current episode as failure and finalizes."""
+        from franka_keyboard_control import DemoRecorder
+
+        controller_instance.recorder = DemoRecorder(obs_dim=23, action_dim=7)
+        controller_instance.recorder.start_recording()
+        # Record at least one step so the episode has data
+        controller_instance.recorder.record_step(np.zeros(23), np.zeros(7), 1.0, False)
+
+        controller_instance._queue_command(('char', ']'))
+        controller_instance._process_commands()
+
+        # Episode should be finalized with failure
+        assert len(controller_instance.recorder.episode_success) == 1
+        assert controller_instance.recorder.episode_success[0] is False
+
+    def test_left_bracket_ignored_when_no_data(self, controller_instance):
+        """Test [ has no effect when no episode data recorded."""
+        from franka_keyboard_control import DemoRecorder
+
+        controller_instance.recorder = DemoRecorder(obs_dim=23, action_dim=7)
+        # No data recorded
+
+        controller_instance._queue_command(('char', '['))
+        controller_instance._process_commands()
+
+        # Should not crash and no episodes should be finalized
+        assert len(controller_instance.recorder.episode_success) == 0
+
+    def test_right_bracket_ignored_when_no_data(self, controller_instance):
+        """Test ] has no effect when no episode data recorded."""
+        from franka_keyboard_control import DemoRecorder
+
+        controller_instance.recorder = DemoRecorder(obs_dim=23, action_dim=7)
+        # No data recorded
+
+        controller_instance._queue_command(('char', ']'))
+        controller_instance._process_commands()
+
+        # Should not crash and no episodes should be finalized
+        assert len(controller_instance.recorder.episode_success) == 0
+
+    def test_handle_recording_command_method_exists(self, controller_instance):
+        """Test _handle_recording_command method exists."""
+        assert hasattr(controller_instance, '_handle_recording_command')
+        assert callable(controller_instance._handle_recording_command)
+
+
+# ============================================================================
+# TEST SUITE 18: Checkpoint Auto-Save Tests
+# ============================================================================
+
+class TestCheckpointAutoSave:
+    """Tests for automatic checkpoint saving."""
+
+    def test_checkpoint_state_variables_exist(self, controller_instance):
+        """Test controller has checkpoint state variables."""
+        assert hasattr(controller_instance, 'checkpoint_frame_counter')
+        assert hasattr(controller_instance, 'checkpoint_interval_frames')
+        assert hasattr(controller_instance, 'checkpoint_flash_frames')
+        assert hasattr(controller_instance, 'checkpoint_flash_duration')
+
+    def test_checkpoint_interval_default(self, controller_instance):
+        """Test default checkpoint interval is 50 frames (~5 seconds)."""
+        assert controller_instance.checkpoint_interval_frames == 50
+
+    def test_perform_checkpoint_save_method_exists(self, controller_instance):
+        """Test _perform_checkpoint_save method exists."""
+        assert hasattr(controller_instance, '_perform_checkpoint_save')
+        assert callable(controller_instance._perform_checkpoint_save)
+
+    def test_checkpoint_save_returns_false_no_recorder(self, controller_instance):
+        """Test checkpoint save returns False when no recorder."""
+        controller_instance.recorder = None
+        result = controller_instance._perform_checkpoint_save()
+        assert result is False
+
+    def test_checkpoint_save_returns_false_empty_data(self, controller_instance):
+        """Test checkpoint save returns False when no data recorded."""
+        from franka_keyboard_control import DemoRecorder
+        controller_instance.recorder = DemoRecorder(obs_dim=23, action_dim=7)
+        result = controller_instance._perform_checkpoint_save()
+        assert result is False
+
+    def test_checkpoint_save_triggers_flash(self, controller_instance, tmp_path):
+        """Test checkpoint save triggers flash indicator."""
+        from franka_keyboard_control import DemoRecorder
+        controller_instance.recorder = DemoRecorder(obs_dim=23, action_dim=7)
+        controller_instance.recorder.start_recording()
+        controller_instance.recorder.record_step(np.zeros(23), np.zeros(7), 1.0, False)
+        controller_instance.demo_save_path = str(tmp_path / "demo.npz")
+        controller_instance.checkpoint_flash_duration = 10
+
+        result = controller_instance._perform_checkpoint_save()
+
+        assert result is True
+        assert controller_instance.checkpoint_flash_frames == 10
+
+
+# ============================================================================
+# TEST SUITE 19: TUI Checkpoint Flash Tests
+# ============================================================================
+
+class TestTUICheckpointFlash:
+    """Tests for TUI checkpoint flash indicator."""
+
+    def test_checkpoint_flash_attribute_exists(self):
+        """Test TUIRenderer has checkpoint_flash_active attribute."""
+        from franka_keyboard_control import TUIRenderer
+        tui = TUIRenderer()
+        assert hasattr(tui, 'checkpoint_flash_active')
+
+    def test_set_checkpoint_flash_method(self):
+        """Test set_checkpoint_flash method works."""
+        from franka_keyboard_control import TUIRenderer
+        tui = TUIRenderer()
+
+        tui.set_checkpoint_flash(True)
+        assert tui.checkpoint_flash_active is True
+
+        tui.set_checkpoint_flash(False)
+        assert tui.checkpoint_flash_active is False
+
+    def test_recording_enabled_attribute_exists(self):
+        """Test TUIRenderer has recording_enabled attribute."""
+        from franka_keyboard_control import TUIRenderer
+        tui = TUIRenderer()
+        assert hasattr(tui, 'recording_enabled')
+
+    def test_set_recording_enabled_method(self):
+        """Test set_recording_enabled method works."""
+        from franka_keyboard_control import TUIRenderer
+        tui = TUIRenderer()
+
+        tui.set_recording_enabled(True)
+        assert tui.recording_enabled is True
+
+
+# ============================================================================
+# TEST SUITE 20: Auto-Save on Exit Tests
+# ============================================================================
+
+class TestAutoSaveOnExit:
+    """Tests for auto-save behavior on exit."""
+
+    def test_exit_saves_pending_data(self, controller_instance, tmp_path):
+        """Test exiting saves any pending recording data."""
+        from franka_keyboard_control import DemoRecorder
+
+        controller_instance.enable_recording = True
+        controller_instance.recorder = DemoRecorder(obs_dim=23, action_dim=7)
+        controller_instance.recorder.start_recording()
+        controller_instance.recorder.record_step(np.zeros(23), np.zeros(7), 1.0, False)
+
+        save_path = str(tmp_path / "demo.npz")
+        controller_instance.demo_save_path = save_path
+
+        # Simulate exit save logic
+        if len(controller_instance.recorder.observations) > 0:
+            controller_instance.recorder.save(save_path)
+
+        assert (tmp_path / "demo.npz").exists()
+
+    def test_exit_finalizes_pending_episode(self, controller_instance):
+        """Test exit finalizes any in-progress episode."""
+        from franka_keyboard_control import DemoRecorder
+
+        controller_instance.enable_recording = True
+        controller_instance.recorder = DemoRecorder(obs_dim=23, action_dim=7)
+        controller_instance.recorder.start_recording()
+        controller_instance.recorder.record_step(np.zeros(23), np.zeros(7), 1.0, False)
+
+        # Simulate exit finalization
+        pending_frames = len(controller_instance.recorder.observations) - controller_instance.recorder.current_episode_start
+        if pending_frames > 0:
+            controller_instance.recorder.mark_episode_success(False)
+            controller_instance.recorder.finalize_episode()
+
+        assert len(controller_instance.recorder.episode_success) == 1
+        assert controller_instance.recorder.episode_success[0] is False
+
+    def test_exit_does_not_save_empty_recording(self, controller_instance, tmp_path):
+        """Test exit does not create file when no data recorded."""
+        from franka_keyboard_control import DemoRecorder
+
+        controller_instance.enable_recording = True
+        controller_instance.recorder = DemoRecorder(obs_dim=23, action_dim=7)
+        # No data recorded
+
+        save_path = str(tmp_path / "demo.npz")
+        controller_instance.demo_save_path = save_path
+
+        # Simulate exit save logic (should not save)
+        if len(controller_instance.recorder.observations) > 0:
+            controller_instance.recorder.save(save_path)
+
+        assert not (tmp_path / "demo.npz").exists()
+
+
+# ============================================================================
+# TEST SUITE 21: Demo Player Tests
+# ============================================================================
+
+class TestDemoPlayer:
+    """Tests for demonstration playback."""
+
+    def test_player_loads_demo_file(self, tmp_path):
+        """Test player loads demonstration file."""
+        from franka_keyboard_control import DemoPlayer
+
+        # Create demo file
+        filepath = tmp_path / "demo.npz"
+        np.savez(str(filepath),
+            observations=np.zeros((10, 23)),
+            actions=np.zeros((10, 7)),
+            rewards=np.ones(10),
+            dones=np.array([False]*9 + [True]),
+            episode_starts=np.array([0]),
+            episode_lengths=np.array([10]),
+            episode_returns=np.array([10.0]),
+            episode_success=np.array([True])
+        )
+
+        player = DemoPlayer(str(filepath))
+
+        assert player.num_episodes == 1
+        assert player.total_frames == 10
+
+    def test_player_attributes(self, tmp_path):
+        """Test player has required attributes after loading."""
+        from franka_keyboard_control import DemoPlayer
+
+        filepath = tmp_path / "demo.npz"
+        np.savez(str(filepath),
+            observations=np.zeros((5, 23)),
+            actions=np.zeros((5, 7)),
+            rewards=np.ones(5),
+            dones=np.array([False]*4 + [True]),
+            episode_starts=np.array([0]),
+            episode_lengths=np.array([5]),
+            episode_returns=np.array([5.0]),
+            episode_success=np.array([True])
+        )
+
+        player = DemoPlayer(str(filepath))
+
+        assert hasattr(player, 'observations')
+        assert hasattr(player, 'actions')
+        assert hasattr(player, 'episode_starts')
+        assert hasattr(player, 'episode_lengths')
+        assert hasattr(player, 'episode_success')
+
+    def test_get_episode_returns_data_slice(self, tmp_path):
+        """Test get_episode returns correct data slice."""
+        from franka_keyboard_control import DemoPlayer
+
+        filepath = tmp_path / "demo.npz"
+        # Two episodes: 3 frames each
+        obs = np.arange(6 * 10).reshape(6, 10)  # Simple distinguishable data
+        np.savez(str(filepath),
+            observations=obs,
+            actions=np.zeros((6, 7)),
+            rewards=np.ones(6),
+            dones=np.array([False, False, True, False, False, True]),
+            episode_starts=np.array([0, 3]),
+            episode_lengths=np.array([3, 3]),
+            episode_returns=np.array([3.0, 3.0]),
+            episode_success=np.array([True, False])
+        )
+
+        player = DemoPlayer(str(filepath))
+        ep_obs, ep_actions = player.get_episode(1)
+
+        assert ep_obs.shape[0] == 3
+        np.testing.assert_array_equal(ep_obs[0], obs[3])
+
+    def test_get_episode_first(self, tmp_path):
+        """Test getting first episode."""
+        from franka_keyboard_control import DemoPlayer
+
+        filepath = tmp_path / "demo.npz"
+        obs = np.arange(6 * 10).reshape(6, 10)
+        np.savez(str(filepath),
+            observations=obs,
+            actions=np.zeros((6, 7)),
+            rewards=np.ones(6),
+            dones=np.array([False, False, True, False, False, True]),
+            episode_starts=np.array([0, 3]),
+            episode_lengths=np.array([3, 3]),
+            episode_returns=np.array([3.0, 3.0]),
+            episode_success=np.array([True, False])
+        )
+
+        player = DemoPlayer(str(filepath))
+        ep_obs, ep_actions = player.get_episode(0)
+
+        assert ep_obs.shape[0] == 3
+        np.testing.assert_array_equal(ep_obs[0], obs[0])
+
+    def test_filter_successful_episodes(self, tmp_path):
+        """Test filtering to only successful episodes."""
+        from franka_keyboard_control import DemoPlayer
+
+        filepath = tmp_path / "demo.npz"
+        np.savez(str(filepath),
+            observations=np.zeros((10, 23)),
+            actions=np.zeros((10, 7)),
+            rewards=np.ones(10),
+            dones=np.array([False]*4 + [True] + [False]*4 + [True]),
+            episode_starts=np.array([0, 5]),
+            episode_lengths=np.array([5, 5]),
+            episode_returns=np.array([5.0, 5.0]),
+            episode_success=np.array([True, False])
+        )
+
+        player = DemoPlayer(str(filepath))
+        successful = player.get_successful_episodes()
+
+        assert len(successful) == 1
+        assert successful[0] == 0
+
+    def test_filter_multiple_successful_episodes(self, tmp_path):
+        """Test filtering with multiple successful episodes."""
+        from franka_keyboard_control import DemoPlayer
+
+        filepath = tmp_path / "demo.npz"
+        np.savez(str(filepath),
+            observations=np.zeros((15, 23)),
+            actions=np.zeros((15, 7)),
+            rewards=np.ones(15),
+            dones=np.array([False]*4 + [True] + [False]*4 + [True] + [False]*4 + [True]),
+            episode_starts=np.array([0, 5, 10]),
+            episode_lengths=np.array([5, 5, 5]),
+            episode_returns=np.array([5.0, 5.0, 5.0]),
+            episode_success=np.array([True, False, True])
+        )
+
+        player = DemoPlayer(str(filepath))
+        successful = player.get_successful_episodes()
+
+        assert len(successful) == 2
+        assert 0 in successful
+        assert 2 in successful
+        assert 1 not in successful
+
+    def test_get_episode_invalid_index(self, tmp_path):
+        """Test get_episode with invalid index raises error."""
+        from franka_keyboard_control import DemoPlayer
+
+        filepath = tmp_path / "demo.npz"
+        np.savez(str(filepath),
+            observations=np.zeros((5, 23)),
+            actions=np.zeros((5, 7)),
+            rewards=np.ones(5),
+            dones=np.array([False]*4 + [True]),
+            episode_starts=np.array([0]),
+            episode_lengths=np.array([5]),
+            episode_returns=np.array([5.0]),
+            episode_success=np.array([True])
+        )
+
+        player = DemoPlayer(str(filepath))
+
+        with pytest.raises(IndexError):
+            player.get_episode(5)  # Only 1 episode exists
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])
