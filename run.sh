@@ -1,9 +1,11 @@
 #!/bin/bash
-# Convenience wrapper to run the Franka keyboard control using Isaac Sim's Python interpreter
+# Universal Isaac Sim Python script launcher
 #
 # Usage:
-#   ./run.sh                    # Run the application
-#   ./run.sh [arguments]        # Run with custom arguments
+#   ./run.sh                              # Run franka_keyboard_control.py
+#   ./run.sh --enable-recording          # Run with recording enabled
+#   ./run.sh replay.py demos/file.npz    # Run replay script
+#   ./run.sh train_bc.py demos/file.npz  # Run training script
 
 ISAAC_PYTHON=~/Downloads/isaac-sim-standalone-5.0.0-linux-x86_64/python.sh
 
@@ -14,6 +16,21 @@ if [ ! -f "$ISAAC_PYTHON" ]; then
     exit 1
 fi
 
-# Run the application with all passed arguments
-echo "Running Franka keyboard control with Isaac Sim's Python..."
-$ISAAC_PYTHON franka_keyboard_control.py "$@"
+# Determine which script to run
+if [ $# -gt 0 ] && [[ "$1" == *.py ]]; then
+    # First arg is a .py file - run that script with remaining args
+    SCRIPT="$1"
+    shift
+
+    # If script doesn't exist as-is, try src/ directory
+    if [ ! -f "$SCRIPT" ]; then
+        SCRIPT="src/$SCRIPT"
+    fi
+
+    echo "Running $SCRIPT with Isaac Sim's Python..."
+    $ISAAC_PYTHON "$SCRIPT" "$@"
+else
+    # No .py file specified - run main app with all args
+    echo "Running Franka keyboard control with Isaac Sim's Python..."
+    $ISAAC_PYTHON src/franka_keyboard_control.py "$@"
+fi

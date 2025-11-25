@@ -18,4 +18,4 @@ fi
 
 # Run pytest with all passed arguments
 echo "Running tests with Isaac Sim's Python..."
-$ISAAC_PYTHON -m pytest test_franka_keyboard_control.py "$@"
+$ISAAC_PYTHON -m pytest src/test_franka_keyboard_control.py "$@"

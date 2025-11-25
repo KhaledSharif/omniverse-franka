@@ -31,17 +31,17 @@ real-time keyboard control of a Franka Panda robot arm with:
 
 **Recording demonstrations:**
 ```bash
-./record.sh
+./run.sh --enable-recording
 ```
 
 **Replay recorded demonstrations:**
 ```bash
-./replay.sh demos/recording_TIMESTAMP.npz
+./run.sh replay.py demos/recording_TIMESTAMP.npz
 ```
 
 **Train behavioral cloning model:**
 ```bash
-./sb3.sh demos/recording_TIMESTAMP.npz
+./run.sh train_bc.py demos/recording_TIMESTAMP.npz
 ```
 
 The Isaac Sim GUI will launch with the Franka arm loaded. Use keyboard controls immediately.
@@ -129,7 +129,7 @@ The end-effector control mode includes IK validation:
 | `Tab` | Switch between Joint and End-Effector modes |
 | `Esc` | Exit application |
 
-### Recording Controls (when using ./record.sh)
+### Recording Controls (when using --enable-recording)
 
 | Key | Action |
 |-----|--------|
@@ -228,7 +228,7 @@ Option B - Switch to Joint Mode:
 **Goal:** Record a pick-and-place demonstration for imitation learning
 
 ```
-1. Run ./record.sh to start recording mode
+1. Run ./run.sh --enable-recording to start recording mode
 2. Position robot at starting pose
 3. Press ` (backtick) to start recording
 4. Perform the pick-and-place task
@@ -418,7 +418,7 @@ NPZ file contains:
 Use the recorded demonstrations to train an imitation learning policy:
 
 ```bash
-./sb3.sh demos/recording_TIMESTAMP.npz
+./run.sh train_bc.py demos/recording_TIMESTAMP.npz
 ```
 
 This trains a behavioral cloning model using the recorded demonstrations and saves the trained policy to `models/`.

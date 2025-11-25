@@ -21,26 +21,27 @@ Franka Panda robot keyboard teleoperation in NVIDIA Isaac Sim 5.0.0 with demonst
 
 | Script | Purpose |
 |--------|---------|
-| `./run.sh` | Run the teleoperation application |
+| `./run.sh` | Universal launcher - runs any Python script with Isaac Sim's Python |
+| `./run.sh --enable-recording` | Run teleoperation with recording enabled |
+| `./run.sh replay.py <demo.npz>` | Replay/inspect recorded demos |
+| `./run.sh train_bc.py <demo.npz>` | Train behavioral cloning model |
 | `./run_tests.sh` | Run pytest tests |
-| `./record.sh` | Record demonstrations (adds `--enable-recording` flag) |
-| `./replay.sh <demo.npz>` | Replay/inspect recorded demos |
-| `./sb3.sh <demo.npz>` | Train behavioral cloning model |
 
 All scripts use Isaac Sim's Python interpreter.
 
 ## Project Structure
 
 ```
-franka_keyboard_control.py   # Main application + all classes
-test_franka_keyboard_control.py  # 150 tests (TDD)
-replay_demo.py               # Demo playback script
-train_bc.py                  # Behavioral cloning training
-demos/                       # Recorded demonstration files (.npz)
-models/                      # Trained model files (.pt)
+src/
+  franka_keyboard_control.py     # Main application + all classes
+  test_franka_keyboard_control.py # 150 tests (TDD)
+  replay.py                       # Demo playback script
+  train_bc.py                     # Behavioral cloning training
+demos/                            # Recorded demonstration files (.npz)
+models/                           # Trained model files (.pt)
 ```
 
-## Key Classes (all in franka_keyboard_control.py)
+## Key Classes (all in src/franka_keyboard_control.py)
 
 - **FrankaKeyboardController** - Main controller with keyboard input and simulation loop
 - **TUIRenderer** - Rich terminal UI with robot state and recording status
