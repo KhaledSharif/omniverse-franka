@@ -44,15 +44,26 @@ real-time keyboard control of a Franka Panda robot arm with:
 ./run.sh train_bc.py demos/recording_TIMESTAMP.npz
 ```
 
-**Train RL agent (requires gymnasium and stable-baselines3):**
-```python
-from franka_rl_env import FrankaPickPlaceEnv
-from stable_baselines3 import PPO
+**Train PPO agent:**
+```bash
+# Train with GUI (for debugging)
+./run.sh train_rl.py --timesteps 100000
 
-env = FrankaPickPlaceEnv(reward_mode='dense')
-model = PPO('MlpPolicy', env, verbose=1)
-model.learn(total_timesteps=100000)
-model.save("models/ppo_franka")
+# Train headless (faster)
+./run.sh train_rl.py --headless --timesteps 500000
+
+# Train with BC warmstart from demonstrations
+./run.sh train_rl.py --headless --bc-warmstart demos/recording.npz --timesteps 1000000
+```
+
+**Evaluate trained policy:**
+```bash
+./run.sh eval_policy.py models/ppo_franka.zip --episodes 100
+```
+
+**Monitor training:**
+```bash
+tensorboard --logdir runs/
 ```
 
 The Isaac Sim GUI will launch with the Franka arm loaded. Use keyboard controls immediately.
@@ -138,6 +149,8 @@ The end-effector control mode includes IK validation:
 | Key | Action |
 |-----|--------|
 | `Tab` | Switch between Joint and End-Effector modes |
+| `R` | Reset to home position |
+| `C` | Spawn random cube (falls from 2m height) |
 | `Esc` | Exit application |
 
 ### Recording Controls (when using --enable-recording)
@@ -485,6 +498,7 @@ from stable_baselines3 import PPO
 env = FrankaPickPlaceEnv(
     reward_mode='dense',      # 'dense' or 'sparse'
     max_episode_steps=500,    # Episode truncation limit
+    headless=True,            # True for faster training (no GUI)
 )
 
 # Train with Stable-Baselines3
@@ -505,3 +519,32 @@ for _ in range(1000):
 
 env.close()
 ```
+
+## Complete RL Training Pipeline
+
+The repository provides a complete end-to-end RL training pipeline:
+
+```bash
+# 1. Record expert demonstrations
+./run.sh --enable-recording
+# Press ` to start/stop recording
+# Press [ to mark episode as success
+# Press ] to mark episode as failure
+
+# 2. (Optional) Train behavioral cloning policy
+./run.sh train_bc.py demos/recording_*.npz --output models/bc_policy.pt
+
+# 3. Train PPO with BC warmstart
+./run.sh train_rl.py --headless --bc-warmstart demos/recording_*.npz --timesteps 1000000
+
+# 4. Monitor training
+tensorboard --logdir runs/
+
+# 5. Evaluate trained policy
+./run.sh eval_policy.py models/ppo_franka.zip --episodes 100 --headless
+
+# 6. Watch policy in action
+./run.sh eval_policy.py models/ppo_franka.zip --episodes 5
+```
+
+See `RL_STATUS.md` for detailed documentation on all RL components.

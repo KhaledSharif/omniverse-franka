@@ -317,6 +317,11 @@ class TUIRenderer:  # pragma: no cover
             Text("[Esc]", style="yellow"),
             Text("Exit", style="dim")
         )
+        table.add_row(
+            self._create_button("C", "c"),
+            Text("Spawn Cube", style="dim"),
+            "", ""
+        )
 
         return Panel(table, title="Controls", border_style="blue")
 
@@ -417,6 +422,11 @@ class TUIRenderer:  # pragma: no cover
             Text("Reset", style="dim"),
             Text("[Esc]", style="yellow"),
             Text("Exit", style="dim")
+        )
+        table.add_row(
+            self._create_button("C", "c"),
+            Text("Spawn Cube", style="dim"),
+            "", ""
         )
 
         return Panel(table, title="Controls", border_style="blue")
@@ -581,6 +591,10 @@ class SceneManager:
         self.cube_size = self.DEFAULT_CUBE_SIZE
         self.workspace_bounds = workspace_bounds or self.DEFAULT_WORKSPACE_BOUNDS.copy()
 
+        # Track spawned random cubes
+        self.random_cube_counter = 0
+        self.random_cubes = []
+
     def spawn_cube(self, position: list = None, size: float = 0.04, color: tuple = (1, 0, 0)):
         """Spawn a graspable cube in the scene.
 
@@ -607,7 +621,8 @@ class SceneManager:
                     name="target_cube",
                     position=pos_array,
                     scale=np.array([size, size, size]),
-                    color=np.array(color[:3])
+                    color=np.array(color[:3]),
+                    density=1000.0  # Ensure proper mass for gravity
                 )
             )
         except ImportError:
@@ -661,6 +676,59 @@ class SceneManager:
             self.goal_marker = self.world.scene.add(marker_mock)
 
         return self.goal_position
+
+    def spawn_random_cube(self, size: float = 0.04, color: tuple = (0.5, 0.5, 1.0)):
+        """Spawn a random cube at 2m height that falls to the table.
+
+        This spawns cubes with unique names for unlimited spawning. Each cube
+        falls naturally with physics enabled.
+
+        Args:
+            size: Cube side length in meters (default 0.04)
+            color: RGB tuple (default light blue: 0.5, 0.5, 1.0)
+
+        Returns:
+            The spawned cube object
+        """
+        # Generate random X, Y position within workspace bounds, Z=2.0m fixed
+        x = np.random.uniform(self.workspace_bounds['x'][0], self.workspace_bounds['x'][1])
+        y = np.random.uniform(self.workspace_bounds['y'][0], self.workspace_bounds['y'][1])
+        z = 2.0  # Fixed height for falling
+
+        position = np.array([x, y, z])
+
+        # Increment counter for unique naming
+        self.random_cube_counter += 1
+        prim_path = f"/World/RandomCube_{self.random_cube_counter:03d}"
+        cube_name = f"random_cube_{self.random_cube_counter:03d}"
+
+        # Try to use real Isaac Sim primitives
+        try:
+            from isaacsim.core.api.objects import DynamicCuboid
+            cube = self.world.scene.add(
+                DynamicCuboid(
+                    prim_path=prim_path,
+                    name=cube_name,
+                    position=position,
+                    scale=np.array([size, size, size]),
+                    color=np.array(color[:3]),
+                    density=1000.0  # Same density as task cube for proper physics
+                )
+            )
+        except ImportError:
+            # Fall back to mock for testing
+            cube_mock = type('RandomCube', (), {
+                'name': cube_name,
+                'position': position,
+                'size': size,
+                'color': color,
+                'get_world_pose': lambda: (position.copy(), np.array([0, 0, 0, 1])),
+                'set_world_pose': lambda position, orientation=None: None
+            })()
+            cube = self.world.scene.add(cube_mock)
+
+        self.random_cubes.append(cube)
+        return cube
 
     def get_cube_pose(self) -> tuple:
         """Get the current pose of the cube.
@@ -1351,7 +1419,6 @@ class FrankaKeyboardController:
 
         # Recording components (initialized if enable_recording is True)
         self.recorder = None
-        self.scene_manager = None
         self.action_mapper = None
         self.obs_builder = None
         self.reward_computer = None
@@ -1364,6 +1431,9 @@ class FrankaKeyboardController:
         self.checkpoint_interval_frames = 50  # 5 seconds at ~10 Hz
         self.checkpoint_flash_frames = 0  # For "SAVED" flash indicator
         self.checkpoint_flash_duration = 10  # ~1 second of flash
+
+        # Always initialize scene_manager for cube spawning (works in both modes)
+        self.scene_manager = SceneManager(self.world)
 
         # Initialize recording components if enabled
         if self.enable_recording:
@@ -1390,9 +1460,6 @@ class FrankaKeyboardController:
 
     def _init_recording_components(self):
         """Initialize recording components for demonstration collection."""
-        # Initialize scene manager with cube and goal
-        self.scene_manager = SceneManager(self.world)
-
         # Initialize demo recorder
         self.recorder = DemoRecorder(obs_dim=23, action_dim=7)
 
@@ -1560,9 +1627,11 @@ class FrankaKeyboardController:
                     self.should_exit = True
                     self.tui.set_last_command("Exiting...")
             elif cmd_type == 'char':
-                # Recording keys work in any mode
+                # Universal commands work in any mode
                 if cmd_value in ('`', '[', ']'):
                     self._handle_recording_command(cmd_value)
+                elif cmd_value == 'c':
+                    self._handle_spawn_random_cube()
                 elif self.control_mode == self.MODE_JOINT:
                     self._process_joint_command(cmd_value)
                 else:
@@ -1624,6 +1693,16 @@ class FrankaKeyboardController:
                 stats = self.recorder.get_stats()
                 self.tui.set_recording_status(True, stats)
                 self.tui.set_last_command(f"Episode {stats['num_episodes']} FAILED - Scene reset")
+
+    def _handle_spawn_random_cube(self):
+        """Handle 'C' key press to spawn random falling cube."""
+        if self.scene_manager is None:
+            self.tui.set_last_command("Cube spawning requires scene manager")
+            return
+
+        cube = self.scene_manager.spawn_random_cube()
+        count = self.scene_manager.random_cube_counter
+        self.tui.set_last_command(f"Spawned random cube #{count}")
 
     def _perform_checkpoint_save(self) -> bool:
         """Perform checkpoint save of recording data.
@@ -1826,6 +1905,12 @@ class FrankaKeyboardController:
     def run(self):
         """Main simulation loop with Rich TUI."""
         self.tui.set_last_command("Starting simulation...")
+
+        # Set up recording scene BEFORE first reset if enabled
+        if self.enable_recording:
+            self._setup_recording_scene()
+
+        # Reset world after scene setup to properly initialize physics
         self.world.reset()
 
         # Try to retrieve actual joint limits from the robot
@@ -1848,9 +1933,8 @@ class FrankaKeyboardController:
         self._reset_to_home()
         self.world.step(render=True)
 
-        # Set up recording scene if enabled
+        # Build initial observation if recording enabled
         if self.enable_recording:
-            self._setup_recording_scene()
             self.current_obs = self._build_current_observation()
 
         reset_needed = False

@@ -93,6 +93,7 @@ class FrankaPickPlaceEnv(gymnasium.Env):
         action_scale: dict = None,
         workspace_bounds: dict = None,
         render_mode: str = 'human',
+        headless: bool = False,
     ):
         """Initialize the Franka pick-and-place environment.
 
@@ -102,6 +103,7 @@ class FrankaPickPlaceEnv(gymnasium.Env):
             action_scale: Dict with 'position', 'rotation', 'gripper' scaling factors
             workspace_bounds: Dict with 'x', 'y', 'z' bounds for workspace
             render_mode: Render mode ('human' for always rendering)
+            headless: If True, run simulation without GUI (faster for training)
         """
         super().__init__()
 
@@ -111,6 +113,7 @@ class FrankaPickPlaceEnv(gymnasium.Env):
         self.action_scale = action_scale or self.DEFAULT_ACTION_SCALE.copy()
         self.workspace_bounds = workspace_bounds or self.DEFAULT_WORKSPACE_BOUNDS.copy()
         self.render_mode = render_mode
+        self.headless = headless
 
         # Define observation and action spaces
         self.observation_space = spaces.Box(
@@ -157,7 +160,7 @@ class FrankaPickPlaceEnv(gymnasium.Env):
 
         # Create SimulationApp if not already created
         if simulation_app is None:
-            simulation_app = SimulationApp({"headless": False})
+            simulation_app = SimulationApp({"headless": self.headless})
         self.simulation_app = simulation_app
 
         # Import Isaac Sim modules after SimulationApp is created

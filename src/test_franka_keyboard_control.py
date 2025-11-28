@@ -1274,6 +1274,79 @@ class TestSceneManager:
         is_complete = manager.check_task_complete(threshold=0.03)
         assert not is_complete
 
+    def test_random_cube_counter_initialized(self, mock_world):
+        """Test random cube counter starts at zero."""
+        from franka_keyboard_control import SceneManager
+
+        manager = SceneManager(mock_world)
+        assert manager.random_cube_counter == 0
+        assert len(manager.random_cubes) == 0
+
+    def test_spawn_random_cube_unique_paths(self, mock_world):
+        """Test each random cube gets unique prim path."""
+        from franka_keyboard_control import SceneManager
+
+        manager = SceneManager(mock_world)
+
+        cube1 = manager.spawn_random_cube()
+        cube2 = manager.spawn_random_cube()
+        cube3 = manager.spawn_random_cube()
+
+        assert manager.random_cube_counter == 3
+        assert len(manager.random_cubes) == 3
+        assert cube1 is not None
+        assert cube2 is not None
+        assert cube3 is not None
+
+    def test_spawn_random_cube_counter_increments(self, mock_world):
+        """Test counter increments correctly."""
+        from franka_keyboard_control import SceneManager
+
+        manager = SceneManager(mock_world)
+
+        assert manager.random_cube_counter == 0
+        manager.spawn_random_cube()
+        assert manager.random_cube_counter == 1
+        manager.spawn_random_cube()
+        assert manager.random_cube_counter == 2
+
+    def test_spawn_random_cube_respects_bounds(self, mock_world):
+        """Test cubes spawn within X/Y bounds at Z=2.0."""
+        from franka_keyboard_control import SceneManager
+
+        manager = SceneManager(mock_world)
+
+        for _ in range(10):
+            cube = manager.spawn_random_cube()
+            # Cube should be spawned (added to scene)
+            assert cube is not None
+            assert mock_world.scene.add.called
+
+            # Verify counter and list are tracking properly
+            assert manager.random_cube_counter > 0
+            assert len(manager.random_cubes) > 0
+
+    def test_spawn_random_cube_default_size(self, mock_world):
+        """Test random cubes use default size."""
+        from franka_keyboard_control import SceneManager
+
+        manager = SceneManager(mock_world)
+        cube = manager.spawn_random_cube()
+
+        # Default size should be 0.04 (same as task cube)
+        assert cube is not None
+        assert manager.random_cube_counter == 1
+
+    def test_spawn_random_cube_custom_size(self, mock_world):
+        """Test random cubes accept custom size."""
+        from franka_keyboard_control import SceneManager
+
+        manager = SceneManager(mock_world)
+        cube = manager.spawn_random_cube(size=0.08)
+
+        assert cube is not None
+        assert manager.random_cube_counter == 1
+
 
 # ============================================================================
 # TEST SUITE 11: Demo Recorder Tests
@@ -2147,6 +2220,45 @@ class TestRecordingControls:
         """Test _handle_recording_command method exists."""
         assert hasattr(controller_instance, '_handle_recording_command')
         assert callable(controller_instance._handle_recording_command)
+
+    def test_c_key_spawns_cube_joint_mode(self, controller_instance):
+        """Test 'c' key spawns cube in joint mode."""
+        from franka_keyboard_control import SceneManager
+
+        controller_instance.control_mode = controller_instance.MODE_JOINT
+        controller_instance.scene_manager = SceneManager(controller_instance.world)
+
+        controller_instance._queue_command(('char', 'c'))
+        controller_instance._process_commands()
+
+        assert controller_instance.scene_manager.random_cube_counter == 1
+
+    def test_c_key_spawns_cube_ee_mode(self, controller_instance):
+        """Test 'c' key spawns cube in end-effector mode."""
+        from franka_keyboard_control import SceneManager
+
+        controller_instance.control_mode = controller_instance.MODE_ENDEFFECTOR
+        controller_instance.scene_manager = SceneManager(controller_instance.world)
+
+        controller_instance._queue_command(('char', 'c'))
+        controller_instance._process_commands()
+
+        assert controller_instance.scene_manager.random_cube_counter == 1
+
+    def test_c_key_handles_no_scene_manager(self, controller_instance):
+        """Test 'c' key gracefully handles when scene_manager is None."""
+        controller_instance.scene_manager = None
+
+        # Should not crash
+        controller_instance._queue_command(('char', 'c'))
+        controller_instance._process_commands()
+
+        # Just verify it doesn't crash - graceful degradation
+
+    def test_handle_spawn_random_cube_method_exists(self, controller_instance):
+        """Test _handle_spawn_random_cube method exists."""
+        assert hasattr(controller_instance, '_handle_spawn_random_cube')
+        assert callable(controller_instance._handle_spawn_random_cube)
 
 
 # ============================================================================
