@@ -44,6 +44,17 @@ real-time keyboard control of a Franka Panda robot arm with:
 ./run.sh train_bc.py demos/recording_TIMESTAMP.npz
 ```
 
+**Train RL agent (requires gymnasium and stable-baselines3):**
+```python
+from franka_rl_env import FrankaPickPlaceEnv
+from stable_baselines3 import PPO
+
+env = FrankaPickPlaceEnv(reward_mode='dense')
+model = PPO('MlpPolicy', env, verbose=1)
+model.learn(total_timesteps=100000)
+model.save("models/ppo_franka")
+```
+
 The Isaac Sim GUI will launch with the Franka arm loaded. Use keyboard controls immediately.
 
 ## Features
@@ -434,3 +445,63 @@ When recording is active, the left TUI panel shows:
 - **Last Action**: Most recent command executed
 
 All controls use the same visual button feedback system as the movement controls for consistency.
+
+## Reinforcement Learning Environment
+
+The project includes a Gymnasium-compatible environment for training RL agents:
+
+### FrankaPickPlaceEnv
+
+**Location:** `src/franka_rl_env.py`
+
+A standard Gymnasium environment wrapper for the Franka pick-and-place task, compatible with Stable-Baselines3, RLlib, CleanRL, and other RL libraries.
+
+**Observation Space (23D):**
+- Joint positions (7)
+- End-effector position (3) and orientation (4, quaternion)
+- Gripper width (1)
+- Cube position (3) and goal position (3)
+- Cube grasped flag (1) and distance to cube (1)
+
+**Action Space (7D, continuous [-1, 1]):**
+- End-effector velocity (3): dx, dy, dz
+- End-effector angular velocity (3): droll, dpitch, dyaw
+- Gripper command (1)
+
+**Features:**
+- Dense and sparse reward modes
+- Configurable action scaling
+- Episode termination on: task completion, cube dropped, out-of-bounds
+- Episode truncation at max_episode_steps (default 500)
+- 59 comprehensive tests
+
+### Example Usage
+
+```python
+from franka_rl_env import FrankaPickPlaceEnv
+from stable_baselines3 import PPO
+
+# Create environment
+env = FrankaPickPlaceEnv(
+    reward_mode='dense',      # 'dense' or 'sparse'
+    max_episode_steps=500,    # Episode truncation limit
+)
+
+# Train with Stable-Baselines3
+model = PPO('MlpPolicy', env, verbose=1)
+model.learn(total_timesteps=100000)
+
+# Save and load
+model.save("models/ppo_franka")
+model = PPO.load("models/ppo_franka")
+
+# Evaluate
+obs, info = env.reset()
+for _ in range(1000):
+    action, _ = model.predict(obs, deterministic=True)
+    obs, reward, terminated, truncated, info = env.step(action)
+    if terminated or truncated:
+        obs, info = env.reset()
+
+env.close()
+```

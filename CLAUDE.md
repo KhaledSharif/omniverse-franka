@@ -33,16 +33,19 @@ All scripts use Isaac Sim's Python interpreter.
 
 ```
 src/
-  franka_keyboard_control.py     # Main application + all classes
-  test_franka_keyboard_control.py # 150 tests (TDD)
+  franka_keyboard_control.py      # Main application + all classes
+  franka_rl_env.py                # Gymnasium RL environment wrapper
+  test_franka_keyboard_control.py # 191 tests for main controller
+  test_franka_rl_env.py           # 59 tests for RL environment
   replay.py                       # Demo playback script
   train_bc.py                     # Behavioral cloning training
 demos/                            # Recorded demonstration files (.npz)
 models/                           # Trained model files (.pt)
 ```
 
-## Key Classes (all in src/franka_keyboard_control.py)
+## Key Classes
 
+### In `src/franka_keyboard_control.py`:
 - **FrankaKeyboardController** - Main controller with keyboard input and simulation loop
 - **TUIRenderer** - Rich terminal UI with robot state and recording status
 - **SceneManager** - Spawns cube/goal marker (uses real Isaac Sim primitives or mocks)
@@ -51,6 +54,9 @@ models/                           # Trained model files (.pt)
 - **ActionMapper** - Maps keyboard input to 7D action vectors
 - **ObservationBuilder** - Builds 23D observation vectors
 - **RewardComputer** - Computes dense/sparse rewards
+
+### In `src/franka_rl_env.py`:
+- **FrankaPickPlaceEnv** - Gymnasium environment for RL training (compatible with Stable-Baselines3)
 
 ## Recording Controls
 

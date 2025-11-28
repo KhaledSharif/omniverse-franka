@@ -2,6 +2,33 @@
 
 ## Current Status Summary
 
+### ✅ **Implemented - Gymnasium Environment**
+
+The repository now has a **complete Gymnasium environment wrapper** for RL training:
+
+**Location:** `src/franka_rl_env.py` - `FrankaPickPlaceEnv` class
+
+**Features:**
+- Standard Gymnasium API (`reset()`, `step()`, `close()`)
+- Compatible with Stable-Baselines3, RLlib, CleanRL, etc.
+- Continuous action space with configurable scaling
+- Dense and sparse reward modes
+- Automatic termination on task completion, cube drop, or out-of-bounds
+- Episode truncation at configurable max steps (default 500)
+- 59 comprehensive tests (250 total tests passing)
+
+**Usage:**
+```python
+from franka_rl_env import FrankaPickPlaceEnv
+from stable_baselines3 import PPO
+
+env = FrankaPickPlaceEnv(reward_mode='dense', max_episode_steps=500)
+model = PPO('MlpPolicy', env, verbose=1)
+model.learn(total_timesteps=100000)
+```
+
+---
+
 ### ✅ **Implemented - Data Collection**
 
 The repository has **complete** infrastructure for collecting RL training data:
@@ -98,22 +125,24 @@ Location: `src/franka_keyboard_control.py:608` - `SceneManager` class
 
 ---
 
-## ❌ **Not Implemented - RL Training & Inference**
+## ⏳ **Partially Implemented - RL Training & Inference**
+
+### Completed Components:
+
+#### 1. **Gymnasium Environment Wrapper** ✅
+**Location:** `src/franka_rl_env.py` - `FrankaPickPlaceEnv` class
+
+**Implemented features:**
+- `gymnasium.Env` subclass wrapping Isaac Sim environment
+- Standard methods: `reset()`, `step()`, `close()`
+- Handles episode termination (task complete, cube dropped, out-of-bounds)
+- Handles episode truncation (max_episode_steps)
+- Properly manages Isaac Sim simulation lifecycle
+- 59 tests covering all functionality
+
+---
 
 ### Missing Components:
-
-#### 1. **Gymnasium Environment Wrapper**
-**What's needed:**
-- A `gym.Env` subclass that wraps the Isaac Sim environment
-- Implements standard methods: `reset()`, `step()`, `render()`, `close()`
-- Handles episode termination and truncation
-- Properly manages Isaac Sim simulation lifecycle
-
-**Why it's needed:**
-- Required for using Stable-Baselines3, RLlib, CleanRL, etc.
-- Provides standard RL interface for training algorithms
-
-**Suggested location:** `src/franka_rl_env.py`
 
 #### 2. **RL Training Script**
 **What's needed:**
@@ -168,9 +197,10 @@ Location: `src/franka_keyboard_control.py:608` - `SceneManager` class
 | Demo replay | ✅ Complete | `replay.py` |
 | **Imitation Learning** | ✅ Complete | `train_bc.py` |
 | Behavioral cloning | ✅ Complete | PyTorch/imitation |
-| **RL Training** | ❌ Missing | N/A |
-| Gym environment | ❌ Missing | N/A |
-| RL algorithms | ❌ Missing | N/A |
+| **RL Environment** | ✅ Complete | `franka_rl_env.py` |
+| Gym environment | ✅ Complete | `FrankaPickPlaceEnv` |
+| **RL Training** | ⏳ Partial | N/A |
+| RL algorithms | ⏳ Ready to use | Via SB3/RLlib |
 | Training script | ❌ Missing | N/A |
 | **RL Evaluation** | ❌ Missing | N/A |
 | Policy loading | ❌ Missing | N/A |
@@ -181,68 +211,27 @@ Location: `src/franka_keyboard_control.py:608` - `SceneManager` class
 
 ## 🚀 **Recommended Implementation Plan**
 
-### Phase 1: Gymnasium Environment Wrapper
+### Phase 1: Gymnasium Environment Wrapper ✅ COMPLETE
 
-Create `src/franka_rl_env.py`:
+**Location:** `src/franka_rl_env.py`
 
+The Gymnasium environment wrapper has been fully implemented with:
+- `FrankaPickPlaceEnv` class inheriting from `gymnasium.Env`
+- 23D observation space (joint positions, EE pose, gripper, cube/goal positions)
+- 7D continuous action space with configurable scaling
+- Dense and sparse reward modes
+- Termination on: task completion, cube dropped, out-of-bounds, cube fell
+- Truncation at max_episode_steps (default 500)
+- 59 comprehensive tests
+
+**Example usage:**
 ```python
-import gymnasium as gym
-from gymnasium import spaces
-import numpy as np
+from franka_rl_env import FrankaPickPlaceEnv
 
-class FrankaPickPlaceEnv(gym.Env):
-    """Gymnasium environment for Franka pick-and-place task."""
-
-    def __init__(self, headless=False, reward_mode='dense'):
-        super().__init__()
-
-        # Define spaces
-        self.observation_space = spaces.Box(
-            low=-np.inf, high=np.inf,
-            shape=(23,), dtype=np.float32
-        )
-        self.action_space = spaces.Box(
-            low=-1.0, high=1.0,
-            shape=(7,), dtype=np.float32
-        )
-
-        # Initialize Isaac Sim components
-        self.sim_app = SimulationApp({"headless": headless})
-        self.world = World(...)
-        self.franka = ...
-        self.scene_manager = SceneManager(self.world)
-        self.obs_builder = ObservationBuilder()
-        self.reward_computer = RewardComputer(mode=reward_mode)
-
-    def reset(self, seed=None, options=None):
-        """Reset environment for new episode."""
-        super().reset(seed=seed)
-
-        # Reset robot to home position
-        # Randomize cube and goal positions
-        # Return initial observation
-
-        obs = self._get_obs()
-        info = {}
-        return obs, info
-
-    def step(self, action):
-        """Execute action and return transition."""
-        # Apply action to robot
-        # Step simulation
-        # Compute observation, reward, termination
-
-        obs = self._get_obs()
-        reward = self._compute_reward(...)
-        terminated = self._check_termination()
-        truncated = self._check_truncation()
-        info = {}
-
-        return obs, reward, terminated, truncated, info
-
-    def close(self):
-        """Cleanup Isaac Sim."""
-        self.sim_app.close()
+env = FrankaPickPlaceEnv(reward_mode='dense', max_episode_steps=500)
+obs, info = env.reset()
+obs, reward, terminated, truncated, info = env.step(action)
+env.close()
 ```
 
 ### Phase 2: RL Training Script
@@ -306,22 +295,33 @@ def evaluate(policy_path, num_episodes=100):
 ## 📝 **Summary**
 
 ### What Works Today:
+- ✅ **Gymnasium environment:** `FrankaPickPlaceEnv` ready for RL training
 - ✅ **Data collection:** Record expert demonstrations with rewards
 - ✅ **Imitation learning:** Train behavioral cloning policies
 - ✅ **Visualization:** Replay recorded demos
 
-### What's Missing for RL:
-- ❌ **Gym environment wrapper** (most critical)
-- ❌ **RL training script** (PPO, SAC, etc.)
-- ❌ **Policy evaluation script**
+### What's Missing for Full RL Pipeline:
+- ❌ **RL training script** (PPO, SAC, etc.) - ~100-150 lines
+- ❌ **Policy evaluation script** - ~100 lines
 
 ### Bottom Line:
-The repository has **excellent infrastructure** for collecting RL data (observations, actions, rewards), but **does not yet support** training or evaluating RL policies. All the hard work (reward functions, observation spaces, scene management) is done - you just need to wrap it in a Gymnasium environment and add training scripts.
+The repository now has a **complete Gymnasium environment** (`src/franka_rl_env.py`) that can be used directly with Stable-Baselines3, RLlib, or any Gymnasium-compatible RL library. The environment:
+- Reuses existing `ObservationBuilder`, `RewardComputer`, and `SceneManager`
+- Implements standard Gymnasium API
+- Has 59 comprehensive tests (250 total tests passing)
 
-### Effort Estimate:
-- Gymnasium wrapper: ~200-300 lines
-- Training script: ~100-150 lines
-- Evaluation script: ~100 lines
-- **Total: ~400-550 lines of code**
+### Ready to Train:
+```python
+from franka_rl_env import FrankaPickPlaceEnv
+from stable_baselines3 import PPO
 
-Given the quality of existing infrastructure, adding full RL support would be straightforward.
+env = FrankaPickPlaceEnv(reward_mode='dense')
+model = PPO('MlpPolicy', env, verbose=1)
+model.learn(total_timesteps=100000)
+model.save("models/ppo_franka")
+```
+
+### Remaining Effort:
+- Training script with logging/checkpoints: ~100-150 lines
+- Evaluation script with metrics: ~100 lines
+- **Total remaining: ~200-250 lines of code**
